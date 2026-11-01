@@ -1,0 +1,5 @@
+venv/
+ml_pipeline/data/
+pycache/
+py_cache/
+*.pyc
