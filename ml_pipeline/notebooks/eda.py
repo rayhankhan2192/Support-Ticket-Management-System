@@ -1,8 +1,6 @@
+# %%
 from __future__ import annotations
-
 import json
-
-
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -12,7 +10,6 @@ import seaborn as sns
 import re
 from pathlib import Path
 from scipy.stats import entropy
-
 import logging, warnings
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", category=UserWarning, module="tensorflow")
@@ -21,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 REQUIRED = ['Ticket category', 'Example message', 'Assigned team']
 FILLER_WORDS = ['really', 'just', 'always', 'still', 'suddenly', 'currently', 'extremely']
+SEED = 42
+PALETTE = sns.color_palette('colorblind', 8)
 
+# %%
 def save_chart(fig, chart_path: Path, filename: str) -> None:
     fig.savefig(chart_path / filename, bbox_inches='tight', facecolor='white', dpi=300)
     plt.close(fig)
@@ -38,8 +38,7 @@ def fmt_pct(n: int, d: int) -> str:
     return f'{n / d * 100:.1f}%' if d else 'n/a'
 
 
-# Load, validate and derive NLP features from the raw data
-
+# %% Load, validate and derive NLP features from the raw data
 def load_data(data_path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     path = Path(data_path)
     if not path.exists():
@@ -77,7 +76,7 @@ def load_data(data_path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     return df, missing
 
 
-# Data auditing and descriptive statistics 
+# %% Data auditing and descriptive statistics 
 def audit_data(df: pd.DataFrame, missing: pd.DataFrame, data_dir: Path) -> dict:
     counts = df.category.value_counts()
     n = len(df)
@@ -114,5 +113,82 @@ def audit_data(df: pd.DataFrame, missing: pd.DataFrame, data_dir: Path) -> dict:
         'has_email_count': int(df.has_email.sum()),
         'has_url_count': int(df.has_url.sum()),
     }
-    (data_dir / 'data_audit.json').write_text(json.dumps(results, indent=4), encoding='utf-8')
+    (data_dir / 'summary_metrics.json').write_text(json.dumps(results, indent=4), encoding='utf-8')
     return results
+
+# %%
+def plot_category_distribution(df: pd.DataFrame, chart_path: Path) -> None:
+    order = df.category.value_counts().index.to_list()
+    counts = df.category.value_counts().reindex(order)
+    fig, ax = plt.subplots(figsize=(11, 5.3))
+    sns.barplot(x=counts.index, y=counts.values, ax=ax, palette='colorblind', legend=False)
+    # Swap x and y to make the bars horizontal
+    #sns.barplot(y=counts.index, x=counts.values, ax=ax, palette='colorblind', legend=False)
+    for p, value in zip(ax.patches, counts.values):
+        ax.text(
+            p.get_width()+10, 
+            p.get_y()+p.get_height()/2, 
+            f'{value:,} ({value/len(df):.1%})', 
+            va='center', 
+            fontsize=9)
+        # ax.text(
+        #     p.get_x() + p.get_width() / 2, 
+        #     p.get_height() + 10, # Note: if your counts are small, 10 might be too high
+        #     f'{value:,} ({value/len(df):.1%})', 
+        #     ha='center', 
+        #     va='bottom', 
+        #     fontsize=9
+        # )
+    ax.set_xlim(0, counts.max() * 1.20)  # Add some space to the right for the text
+    ax.set(title='01. Ticket category distribution', xlabel='Ticket count', ylabel='')
+    save_chart(fig, chart_path, '01_category_distribution.png')
+    
+    ax.pie(counts.values, labels=counts.index, autopct='%1.1f%%', startangle=90, colors=sns.color_palette('colorblind'))
+    ax.set_title('02. Category proportion')
+    save_chart(fig, chart_path, '02_category_donut.png')
+    
+    mapping = pd.crosstab(df.category, df.team)
+    fig, ax = plt.subplots(figsize=(11,6))
+    sns.heatmap(mapping, annot=True, fmt='d', cmap='Blues', linewidths=.6, ax=ax, cbar=False)
+    ax.set(title='03. Category–team mapping (do not use team to predict category)', xlabel='Assigned team', ylabel='Ticket category')
+    ax.tick_params(axis='x', labelrotation=30)
+    save_chart(fig, chart_path, '03_category_team_heatmap.png')
+
+    fig, ax = plt.subplots(figsize=(10,5))
+    sns.histplot(df.char_count, bins=35, kde=True, color=PALETTE[0], ax=ax)
+    ax.axvline(df.char_count.median(), ls='--', lw=1.6, label=f'Median: {df.char_count.median():.0f} chars')
+    ax.set(title='04. Message length distribution', xlabel='Characters per ticket')
+    ax.legend()
+    save_chart(fig, chart_path, '04_character_lengths.png')
+
+    fig, ax = plt.subplots(figsize=(11,5.5))
+    sns.violinplot(data=df, y='category', x='word_count', order=order,
+                    hue='category', palette='colorblind', legend=False, inner='quart', cut=0, ax=ax)
+    ax.set(title='05. Word count by ticket category', xlabel='Words per message', ylabel='')
+    save_chart(fig, chart_path, '05_word_count_by_category.png')
+
+    fig, ax = plt.subplots(figsize=(10,5))
+    sns.histplot(data=df, x='word_count', binwidth=1, discrete=True, color=PALETTE[0], ax=ax)
+    ax.set(title='06. Overall words per ticket', xlabel='Word count', ylabel='Tickets')
+    save_chart(fig, chart_path, '06_word_count_distribution.png')
+
+    fig, ax = plt.subplots(figsize=(10,5.5))
+    sample = df.sample(min(len(df), 2500), random_state=SEED)
+    sns.scatterplot(data=sample, x='word_count', y='char_count', hue='category',
+                    alpha=.43, s=21, palette='colorblind', ax=ax)
+    ax.set(title='07. Word count vs character count (sample)', xlabel='Words', ylabel='Characters')
+    ax.legend(loc='upper left', bbox_to_anchor=(1.01,1), fontsize=8, title='Ticket category')
+    save_chart(fig, chart_path, '07_word_vs_character_scatter.png')
+
+    fig, ax = plt.subplots(figsize=(11,5.5))
+    sns.boxplot(data=df, x='lexical_diversity', y='category', order=order,
+                hue='category', palette='colorblind', legend=False, ax=ax)
+    ax.set(title='08. Message lexical diversity (unique words / total words)',
+            xlabel='Lexical diversity per message', ylabel='')
+    save_chart(fig, chart_path, '08_lexical_diversity.png')
+
+    usage = df.groupby('category')[['question_mark','exclamation_mark','number_present']].mean().mul(100)
+    fig, ax = plt.subplots(figsize=(9,5.2))
+    sns.heatmap(usage, annot=True, fmt='.1f', cmap='YlGnBu', ax=ax, cbar_kws={'label':'% of tickets'})
+    ax.set(title='09. Punctuation and numerical information across categories', xlabel='Text feature', ylabel='')
+    save_chart(fig, chart_path, '09_text_feature_heatmap.png')
