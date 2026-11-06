@@ -222,3 +222,25 @@ def plot_frequencies(df: pd.DataFrame, chart_path: Path, table_path: Path) -> No
             sns.barplot(data=word_counts.head(20).iloc[::-1], x='count', y='term', color=PALETTE[0], ax=ax)
         ax.set(title=f'{num}. Top 20 {label.lower()} (English stopwords removed)', xlabel='Corpus frequency', ylabel='')
         save_chart(fig, chart_path, f'{num}_top_{label.lower()}.png')
+        
+        all_counts = []
+        for category in sorted(df.category.unique()):
+            freqs = freq_table(df.loc[df.category.eq(category), 'message'], ngram, top_n=20)
+            freqs.insert(0, 'category', category)
+            all_counts.append(freqs)
+        
+        if not all_counts:
+            logger.warning(f"No frequency data found for {label.lower()}. Skipping plot.")
+            return
+        per_category_counts = pd.concat(all_counts, ignore_index=True)
+        per_category_counts.to_csv(table_path / f'top_{label.lower()}_by_category.csv', index=False)
+        groups = sorted(df.category.unique())
+        fig, ax = plt.subplots(figsize=(11,5.5))
+        for category, ax in zip(groups, ax.ravel()):
+            subset = per_category_counts[per_category_counts.category.eq(category)]
+            if not subset.empty:
+                sns.barplot(data=subset.head(20).iloc[::-1], x='count', y='term', color=PALETTE[0], ax=ax)
+            ax.set(title=f'{num}. Top 20 {label.lower()} for category: {category}', xlabel='Corpus frequency', ylabel='')
+        fig.suptitle('12. Top unigrams for each category',y=1.002,fontsize=15)
+        fig.tight_layout()
+        save_chart(fig, chart_dir, '12_category_top_unigrams.png')
