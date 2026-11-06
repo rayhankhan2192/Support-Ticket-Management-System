@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 from scipy.stats import entropy
 import logging, warnings
+from sklearn.feature_extraction.text import CountVectorizer
+
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", category=UserWarning, module="tensorflow")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
@@ -192,3 +194,31 @@ def plot_category_distribution(df: pd.DataFrame, chart_path: Path) -> None:
     sns.heatmap(usage, annot=True, fmt='.1f', cmap='YlGnBu', ax=ax, cbar_kws={'label':'% of tickets'})
     ax.set(title='09. Punctuation and numerical information across categories', xlabel='Text feature', ylabel='')
     save_chart(fig, chart_path, '09_text_feature_heatmap.png')
+
+
+# %% Frequency analysis of words and phrases
+def freq_table( texts: pd.Series, ngram: tuple[int, int], stopwords: str = 'english', top_n: int = 25) -> pd.DataFrame:
+    try:
+        vectorizer = CountVectorizer(ngram_range=ngram, stop_words=stopwords)
+        X = vectorizer.fit_transform(texts)
+    except ValueError as e:
+        logger.error(f"Error in CountVectorizer: {e}")
+        return pd.DataFrame(columns=['ngram', 'count'])
+    
+    freqs = np.asarray(X.sum(axis=0)).ravel()
+    idx = np.argsort(freqs)[::-1][:top_n]
+    return pd.DataFrame({
+        'ngram': np.array(vectorizer.get_feature_names_out())[idx],
+        'count': freqs[idx].astype(int),
+    })
+    
+    
+def plot_frequencies(df: pd.DataFrame, chart_path: Path, table_path: Path) -> None:
+    for ngram, label, num in [((1,1), 'Unigrams', '10'), ((2,2), 'Bigrams', '11')]:
+        word_counts = freq_table(df.message, ngram, top_n=25)
+        word_counts.to_csv(table_path / f'top_{label.lower()}.csv', index=False)
+        fig, ax = plt.subplots(figsize=(11,5.5))
+        if not word_counts.empty:
+            sns.barplot(data=word_counts.head(20).iloc[::-1], x='count', y='term', color=PALETTE[0], ax=ax)
+        ax.set(title=f'{num}. Top 20 {label.lower()} (English stopwords removed)', xlabel='Corpus frequency', ylabel='')
+        save_chart(fig, chart_path, f'{num}_top_{label.lower()}.png')
